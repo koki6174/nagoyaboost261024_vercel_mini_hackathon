@@ -434,7 +434,7 @@
   .reveal-heading { animation: greeting-enter .6s ease-out both; }
   .result-card { position: relative; }
   .result-upper { overflow: hidden; isolation: isolate; }
-  .result-upper > *:not(.blessing-burst) { position: relative; z-index: 1; }
+  .result-upper > *:not(.blessing-burst):not(.paper-corner) { position: relative; z-index: 1; }
   .fortune-scroll-mark { display: block; font: 700 13px var(--serif); letter-spacing: .34em; margin: 16px auto 0; color: #be9a5f; }
   .result-upper h2 { animation: fortune-unfurl .9s cubic-bezier(.18,.75,.25,1.2) both; }
   .result-card.celebration .result-upper { background: radial-gradient(circle at 50% 26%,#fff8dc,#fff7ea 58%,#f9ebd6); }

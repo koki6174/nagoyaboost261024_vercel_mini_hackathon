@@ -1,11 +1,32 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { tick } from 'svelte';
   import type { ActionData, PageData } from './$types';
 
   let { data, form }: { data: PageData; form: ActionData } = $props();
   let drawing = $state(false);
   let wish = $state('今日の運勢');
   let shareMessage = $state('');
+  let drawError = $state('');
+  let ceremonyPhase = $state(0);
+  let tied = $state(false);
+  const burstPieces = Array.from({ length: 18 }, (_, i) => i);
+
+  const ceremonyLines = [
+    '',
+    '願いを、そっと込めて…',
+    '福を、呼び寄せています…',
+    'お告げの準備ができました',
+    'さあ、開運の瞬間です'
+  ];
+
+  const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  const prefersLessMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const moveTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: prefersLessMotion() ? 'auto' : 'smooth', block: 'start' });
+  };
+
 
   const wishes = [
     { name: '今日の運勢', symbol: '✦' },
@@ -76,26 +97,57 @@
       <p class="wish-note">※ テーマは演出用です。運勢はランダムに抽選されます。</p>
       <form method="POST" action="?/draw" use:enhance={() => {
         drawing = true;
+        tied = false;
         shareMessage = '';
-        return async ({ update }) => {
+        drawError = '';
+        ceremonyPhase = 1;
+        const startedAt = Date.now();
+        // The draw itself remains server-side. Only presentation is delayed for the ceremony.
+        const firstStep = window.setTimeout(() => { if (drawing) ceremonyPhase = 2; }, 550);
+        const secondStep = window.setTimeout(() => { if (drawing) ceremonyPhase = 3; }, 1300);
+        window.requestAnimationFrame(() => moveTo('ritual-stage'));
+
+        return async ({ result, update }) => {
           try {
-            await new Promise<void>((resolve) => setTimeout(resolve, 950));
-            await update({ reset: false });
+            const minimumCeremony = prefersLessMotion() ? 0 : 2100;
+            await wait(Math.max(0, minimumCeremony - (Date.now() - startedAt)));
+            window.clearTimeout(firstStep);
+            window.clearTimeout(secondStep);
+            if (result.type === 'success') {
+              ceremonyPhase = 4;
+              await update({ reset: false });
+              drawing = false;
+              await tick();
+              // Two frames let the new fortune card enter the layout before scrolling.
+              window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(() => moveTo('fortune-result'));
+              });
+            } else {
+              await update({ reset: false });
+              drawError = 'おみくじを引けませんでした。通信状態を確認して、もう一度お試しください。';
+            }
+          } catch (error) {
+            console.error('[fuku-mikuji] Draw presentation failed', error);
+            drawError = 'お告げの表示で問題が発生しました。画面を更新して、もう一度お試しください。';
           } finally {
+            window.clearTimeout(firstStep);
+            window.clearTimeout(secondStep);
             drawing = false;
+            ceremonyPhase = 0;
           }
         };
       }}>
         <button type="submit" class="draw-button" disabled={drawing}>
           <span class="draw-spark" aria-hidden="true">✧</span>
-          <span>{drawing ? '福を呼び寄せています…' : form?.result ? 'もう一度、おみくじを引く' : '願いを込めて、おみくじを引く'}</span>
+          <span>{drawing ? 'お告げを準備しています…' : form?.result ? 'もう一度、おみくじを引く' : '願いを込めて、おみくじを引く'}</span>
           <span class="draw-arrow" aria-hidden="true">→</span>
         </button>
       </form>
+      {#if drawError}<p class="draw-error" role="alert">{drawError}</p>{/if}
       <div class="foot-note"><span class="star-mark" aria-hidden="true">✦</span> おみくじは何度でも引けます <span class="foot-divider">/</span> 全7種類の運勢</div>
     </div>
 
-    <div class="stage" class:drawing aria-label="おみくじ箱のイラスト">
+    <div id="ritual-stage" class="stage" class:drawing class:awakening={ceremonyPhase >= 3} aria-label="おみくじ箱のイラスト">
       <div class="stage-grid" aria-hidden="true"></div>
       <div class="stage-header"><span>福</span><span>招</span><span>き</span><span>の</span><span>社</span></div>
       <div class="moon" aria-hidden="true"></div>
@@ -118,22 +170,41 @@
           <span class="art-box-caption">おみくじ</span>
         </div>
       </div>
+      {#if drawing}
+        <div class="ritual-lights" aria-hidden="true">
+          {#each burstPieces.slice(0, 12) as piece (piece)}
+            <i style="--light-number: {piece}"></i>
+          {/each}
+        </div>
+        <div class="ritual-caption" role="status" aria-live="polite">
+          <div class="ritual-line"><span aria-hidden="true">✧</span> {ceremonyLines[ceremonyPhase] || ceremonyLines[2]} <span aria-hidden="true">✧</span></div>
+          <div class="ritual-dots" aria-hidden="true"><span class:active={ceremonyPhase >= 1}></span><span class:active={ceremonyPhase >= 2}></span><span class:active={ceremonyPhase >= 3}></span></div>
+        </div>
+      {/if}
       <div class="stage-footer"><span></span> SHAKE & FIND YOUR FORTUNE <span></span></div>
     </div>
   </section>
 
   {#if form?.result}
-    <section class="reveal" aria-labelledby="result-title">
+    <section id="fortune-result" class="reveal" aria-labelledby="result-title">
       <div class="reveal-heading"><span class="heading-line"></span><span>✧ お告げが届きました ✧</span><span class="heading-line"></span></div>
-      <div class="result-card" style="--fortune-tone: {rankTone[form.result.rank] ?? '#b73535'}">
+      {#key form.record?.id ?? form.result.rank}
+      <div class="result-card" class:celebration={form.result.rank === '大吉' || form.result.rank === '中吉'} style="--fortune-tone: {rankTone[form.result.rank] ?? '#b73535'}">
+        {#if form.result.rank === '大吉'}
+          <div class="blessing-burst" aria-hidden="true">
+            {#each burstPieces as piece (piece)}<i style="--index: {piece}"></i>{/each}
+          </div>
+        {/if}
         <div class="result-upper">
           <div class="paper-corner top-left">✿</div><div class="paper-corner top-right">✿</div>
           <span class="fortune-kicker">FUKU FORTUNE · 御神籤</span>
+          <span class="fortune-scroll-mark" aria-hidden="true">✦　開運招福　✦</span>
           <span class="result-topic">{wish}</span>
           <h2 id="result-title">{form.result.rank}</h2>
           <p class="fortune-phrase">{rankWords[form.result.rank] ?? '今日もよい一日を'}</p>
           <div class="ornament-divider"><span>◆</span></div>
           <p class="oracle">{form.result.message}</p>
+          {#if form.result.rank === '大吉'}<p class="special-message">✦　今日は、とびきりの福日和！　✦</p>{/if}
         </div>
         <div class="lucky-section">
           <p class="lucky-title">TODAY'S LUCKY CHARMS <span>今日の開運アイテム</span></p>
@@ -146,12 +217,21 @@
         <div class="result-bottom">
           <button class="share-button" type="button" onclick={shareFortune}><span aria-hidden="true">↗</span> お告げをシェア</button>
           <a class="history-link" href="/history">これまでのおみくじを見る <span aria-hidden="true">→</span></a>
+          <button class="again-button" type="button" onclick={() => moveTo('hero-title')}>もう一度引く ↑</button>
         </div>
         {#if shareMessage}<p class="share-status" role="status">{shareMessage}</p>{/if}
+        {#if form.result.rank === '凶' || form.result.rank === '大凶'}
+          <div class="tie-section">
+            <p>気になるお告げは、ここに結んで心を切り替えよう。</p>
+            <button type="button" class="tie-button" aria-pressed={tied} onclick={() => (tied = !tied)}>{tied ? '✿　気持ちを結びました' : '✿　おみくじを結ぶ'}</button>
+            {#if tied}<p class="tie-done" role="status">心機一転。明日はまた、新しい一日です。</p>{/if}
+          </div>
+        {/if}
         {#if !form.persisted}
           <p class="storage-note">おみくじ帳は現在一時保存モードです。時間が経つと記録が消える場合があります。</p>
         {/if}
       </div>
+      {/key}
     </section>
   {:else}
     <section class="guide" aria-label="おみくじの楽しみ方">
@@ -332,4 +412,65 @@
     .guide-grid p br { display: none; }
     .bottom-invite { font-size: 12px; margin-top: 48px; }
   }
+
+  /* Ceremony: movement is decorative; the draw remains server-authoritative. */
+  #ritual-stage, #fortune-result { scroll-margin-top: 24px; }
+  .draw-error { color: #a52f33; font-size: 12px; margin-top: 16px; line-height: 1.7; }
+  .stage.drawing { box-shadow: 0 0 0 6px #e8bf7a50, 0 0 55px #bd985e44, inset 0 0 0 1px #48606a; }
+  .stage.drawing .omikuji-art { animation: ceremonial-shake .49s ease-in-out infinite; }
+  .stage.drawing .fortune-stick.one { animation: stick-left .9s ease-in-out infinite alternate; }
+  .stage.drawing .fortune-stick.two { animation: stick-center .75s ease-in-out infinite alternate; }
+  .stage.drawing .fortune-stick.three { animation: stick-right 1.05s ease-in-out infinite alternate; }
+  .stage.awakening .moon { animation: moon-awaken 1.15s ease-in-out infinite alternate; }
+  .ritual-lights { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+  .ritual-lights i { position: absolute; left: 50%; top: 52%; width: 5px; height: 5px; background: #ffe0a0; border-radius: 50%; box-shadow: 0 0 15px 4px #f6d192d1; --light-angle: calc(var(--light-number) * 30deg); animation: ritual-light 1.6s ease-out infinite; animation-delay: calc(var(--light-number) * -0.14s); }
+  .ritual-caption { position: absolute; z-index: 5; left: 30px; right: 30px; bottom: 66px; text-align: center; padding: 14px 12px; background: #162e3de3; border: 1px solid #f5dba177; border-radius: 8px; color: #ffe3aa; backdrop-filter: blur(8px); box-shadow: 0 10px 25px #0004; }
+  .ritual-line { font: 700 clamp(12px, 2vw, 16px) var(--serif); letter-spacing: .09em; }
+  .ritual-line span { padding: 0 6px; }
+  .ritual-dots { display: flex; justify-content: center; gap: 7px; margin-top: 10px; }
+  .ritual-dots span { background: #ffffff40; width: 18px; height: 3px; border-radius: 99px; transition: background .2s, width .2s; }
+  .ritual-dots span.active { background: #ffd791; width: 30px; }
+  .reveal { position: relative; }
+  .reveal-heading { animation: greeting-enter .6s ease-out both; }
+  .result-card { position: relative; }
+  .result-upper { overflow: hidden; isolation: isolate; }
+  .result-upper > *:not(.blessing-burst) { position: relative; z-index: 1; }
+  .fortune-scroll-mark { display: block; font: 700 13px var(--serif); letter-spacing: .34em; margin: 16px auto 0; color: #be9a5f; }
+  .result-upper h2 { animation: fortune-unfurl .9s cubic-bezier(.18,.75,.25,1.2) both; }
+  .result-card.celebration .result-upper { background: radial-gradient(circle at 50% 26%,#fff8dc,#fff7ea 58%,#f9ebd6); }
+  .result-card.celebration .result-upper h2 { text-shadow: 0 4px 0 #eadfc4,0 0 18px #d6bc773b; }
+  .result-card.celebration .result-upper::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: repeating-conic-gradient(from -5deg at 50% 38%,#d3b26310 0deg 13deg,transparent 13deg 28deg); animation: fortune-glow 10s linear infinite; }
+  .special-message { color: #aa823f; font: 700 12px var(--serif); letter-spacing: .13em; margin: 22px 0 0; }
+  .blessing-burst { pointer-events: none; position: absolute; inset: 0; z-index: 2; overflow: hidden; }
+  .blessing-burst i { position: absolute; top: 43%; left: 50%; width: 9px; height: 15px; background: #d8aa51; border-radius: 2px; --burst-angle: calc(var(--index) * 20deg); opacity: 0; animation: blessing-burst 1.45s cubic-bezier(.16,.64,.33,1) both; animation-delay: calc(var(--index) * 35ms); }
+  .blessing-burst i:nth-child(3n) { background: #d45d50; width: 6px; height: 10px; }
+  .blessing-burst i:nth-child(4n) { background: #fff2be; border: 1px solid #c59b65; width: 6px; height: 6px; }
+  .again-button { border: 0; background: transparent; color: #946947; font-size: 12px; padding: 10px; }
+  .again-button:hover { text-decoration: underline; }
+  .tie-section { margin: 0 auto 20px; padding: 18px; width: min(92%,520px); text-align: center; border-top: 1px dashed #d8c9b4; color: #827363; font-size: 12px; }
+  .tie-section p { margin: 0 0 11px; }
+  .tie-button { border: 1px solid #bb8a88; background: #fff4ee; color: #ab4a43; border-radius: 999px; padding: 9px 22px; font-weight: 700; font-size: 12px; }
+  .tie-button:hover { background: #f8e8df; }
+  .tie-done { margin: 10px 0 0 !important; font: 700 12px var(--serif); color: #56806d; }
+  @keyframes ceremonial-shake { 0%,100% { transform: translateX(-50%) rotate(-11deg) translateY(0); } 50% { transform: translateX(-50%) rotate(12deg) translateY(-8px); } }
+  @keyframes stick-left { from { transform: rotate(-12deg) translateY(0); } to { transform: rotate(-24deg) translateY(-18px); } }
+  @keyframes stick-center { from { transform: rotate(4deg) translateY(0); } to { transform: rotate(-2deg) translateY(-25px); } }
+  @keyframes stick-right { from { transform: rotate(20deg) translateY(0); } to { transform: rotate(31deg) translateY(-12px); } }
+  @keyframes ritual-light { 0% { transform: rotate(var(--light-angle)) translateY(0) scale(.4); opacity: 0; } 30% { opacity: 1; } 100% { transform: rotate(var(--light-angle)) translateY(-215px) scale(1.1); opacity: 0; } }
+  @keyframes moon-awaken { from { filter: drop-shadow(0 0 35px #dfc68a55); } to { filter: drop-shadow(0 0 78px #ffdc87b0); } }
+  @keyframes fortune-unfurl { from { opacity: 0; transform: translateY(22px) scale(.8); filter: blur(5px); } to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } }
+  @keyframes greeting-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fortune-glow { to { transform: rotate(360deg); } }
+  @keyframes blessing-burst { 0% { opacity: 0; transform: rotate(var(--burst-angle)) translateY(0) scale(.5); } 28% { opacity: 1; } 100% { opacity: 0; transform: rotate(var(--burst-angle)) translateY(-195px) scale(1) rotate(100deg); } }
+  @media(max-width:480px) {
+    .ritual-caption { left: 18px; right: 18px; bottom: 47px; padding: 12px 9px; }
+    .ritual-line { font-size: 12px; }
+    .fortune-scroll-mark { font-size: 11px; }
+  }
+  @media(prefers-reduced-motion:reduce) {
+    .stage.drawing .omikuji-art, .stage.drawing .fortune-stick, .stage.awakening .moon,
+    .ritual-lights i, .blessing-burst i, .result-card.celebration .result-upper::after,
+    .result-upper h2, .reveal-heading, .result-card { animation: none !important; transition: none !important; }
+  }
+
 </style>

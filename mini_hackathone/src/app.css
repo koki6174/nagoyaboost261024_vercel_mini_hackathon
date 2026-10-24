@@ -1,33 +1,38 @@
 :root {
-	--bg: #fbf7f0;
-	--surface: #ffffff;
-	--fg: #1f1b16;
-	--muted: #7a6f63;
-	--line: #e7ddcf;
-	--accent: #b3261e;
-	color-scheme: light dark;
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  color: #20303d;
+  background: #f7f3eb;
+  font-synthesis: none;
+  --bg: #f7f3eb;
+  --surface: #fffdf8;
+  --fg: #20303d;
+  --muted: #78808a;
+  --line: #e5e0d5;
+  --accent: #b73535;
+  --red: #b73535;
+  --gold: #c09b57;
+  --night: #172a38;
+  --serif: "Yu Mincho", "Hiragino Mincho ProN", "Noto Serif JP", Georgia, serif;
+  color-scheme: light;
 }
-
-@media (prefers-color-scheme: dark) {
-	:root {
-		--bg: #16130f;
-		--surface: #211d18;
-		--fg: #f2ece3;
-		--muted: #a89c8d;
-		--line: #362f27;
-		--accent: #e0564c;
-	}
-}
-
-* {
-	box-sizing: border-box;
-}
-
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body {
-	margin: 0;
-	background: var(--bg);
-	color: var(--fg);
-	font-family:
-		'Hiragino Kaku Gothic ProN', 'Yu Gothic', system-ui, -apple-system, 'Segoe UI', sans-serif;
-	line-height: 1.7;
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(ellipse 65% 40% at 95% 0%, rgba(224, 196, 135, .18), transparent 70%),
+    radial-gradient(ellipse 45% 40% at 0% 65%, rgba(183, 53, 53, .055), transparent 75%),
+    var(--bg);
+  color: var(--fg);
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; }
+button { cursor: pointer; }
+a { color: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #d2aa6e; outline-offset: 4px; }
+::selection { background: #ecd8ba; color: #1d2730; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
